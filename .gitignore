@@ -1,0 +1,3 @@
+#build 및 config 파일 제외
+/.vscode
+build
