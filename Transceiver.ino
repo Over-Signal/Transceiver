@@ -21,7 +21,7 @@ void setup() {
   Serial.println("LoRa Sender Ready!");
   delay(1000); // 모듈 안정화 대기
 
-  Serial.timeout(500);//입력버퍼 대기 default 500ms
+  Serial.setTimeout(500);//입력버퍼 대기 default 500ms
 }
 
 void loop() {
