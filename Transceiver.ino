@@ -18,10 +18,10 @@ void setup() {
   digitalWrite(M0_PIN, LOW);
   digitalWrite(M1_PIN, LOW);
   
-  Serial.println("LoRa Sender Ready!");
+  //Serial.println("LoRa Sender Ready!");
   delay(1000); // 모듈 안정화 대기
 
-  Serial.setTimeout(500);//입력버퍼 대기 default 500ms
+  Serial.setTimeout(50);//입력버퍼 대기 default 500ms
 }
 
 void loop() {
@@ -33,30 +33,28 @@ void loop() {
   if(myLoRa.available() > 0){ //수신된 데이터가 있을 때
     delay(10);
     dataLength = myLoRa.available();
-    Serial.println(dataLength);
-    uint8_t buff[dataLength];
+    //Serial.println(dataLength);
+    String buff;
 
-    for(int i = 0; i < dataLength; i++){
-      buff[i] = myLoRa.read();
-    }
+    buff = myLoRa.readString();
     //myLoRa.readbytes(buff, dataLength);
     
-    Serial.print("Received: ");
-    for(int i=0; i < dataLength-1; i++){
+    // for(int i=0; i < dataLength-1; i++){
+    //   Serial.write(buff[i]);
+    // }
+
+    for(int i=0; i < dataLength - 1; i++){
       Serial.write(buff[i]);
     }
-    uint8_t raw_rssi = buff[dataLength - 1];
+    char raw_rssi = buff.charAt(buff.length() - 1);
     
     // 계산식: 입력값 - 256 = dBm
-    int rssi_dbm = (int)raw_rssi - 256;
-
-    Serial.print("  |  [RSSI] ");
-    Serial.print(rssi_dbm);
-    Serial.println(" dBm");
+    int rssi_dbm = (uint8_t)raw_rssi - 256;
+    Serial.print('/');
+    Serial.println(rssi_dbm);
   }
 
   if(Serial.available()>0){//사용자가 입력한 데이터가 있을 때
-    Serial.print("Sending: ");
     receivedMsg = Serial.readStringUntil('\n');
     myLoRa.print(receivedMsg);
   }
