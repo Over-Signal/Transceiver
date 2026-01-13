@@ -7,7 +7,7 @@ SoftwareSerial myLoRa(2, 3);
 #define M0_PIN 7
 #define M1_PIN 6
 #define AUX_PIN 4
-
+#define THIS_NOD_NUM 1
 
 String ammo = "";
 bool coked = false;
@@ -31,8 +31,57 @@ void setup() {
   randomSeed(analogRead(A0));
 }
 
+
 void runTDMA() {
-  //나중에
+  
+  //타임슬롯과 switch case 문으로 특정 시간에는 해당 노드만 말 하도록 작성
+  
+
+  //1. 수신----------------------------------------------------
+
+  if(myLoRa.available() > 0){ 
+    delay(10); // 데이터가 전송되는 동안 살짝 기다림 (안정성)
+    String buff = myLoRa.readString();
+    
+    for(int i=0; i < buff.length() - 1; i++){
+      Serial.write(buff[i]); // PC로 한 글자씩 보냄
+    }
+
+    char raw_rssi = buff.charAt(buff.length() - 1);
+
+    int rssi_dbm = (uint8_t)raw_rssi - 256;
+    Serial.print('/');
+    Serial.println(rssi_dbm);
+  }
+
+  //2. 코킹--------------------------------------------------
+  
+  if(Serial.available()>0 && coked == false){
+    delay(10); //안정성
+    ammo = Serial.readStringUntil('\n');
+
+    if(ammo.length()>0) {
+      coked = true;
+      Serial.print("[SYSTEM]coked, sucess");
+    }
+
+  //3. 송신-----------------------------------
+  //장전이 되어있다면, 타임슬롯을 생성 지금 타임 슬롯을 확인하여 
+  //자신이 지금 말해도 되는 타임 슬롯이라면 송신!
+  if(coked == true){
+    int tiemSlot = (millis()/1000)%4+1  //1~4 4개의 타임 슬롯
+    
+    if(tiemSlot == THIS_NOD_NUM) {
+
+      myLoRa.print(ammo);
+      coked = false;
+      ammo = ""
+      Serial.print("[SYSTEM]send success, currentMillis : ");
+      Serial.print(currentMillis);
+
+      //타임가드 추가하기
+    }
+  }
 }
 
 void runCSMA() {
@@ -56,7 +105,6 @@ void runCSMA() {
   }
 
 
-  
   //2. 코킹--------------------------------------------------
   if(Serial.available()>0 && coked == false){
     delay(10); //안정성
@@ -64,7 +112,7 @@ void runCSMA() {
 
     if(ammo.length()>0) {
       coked = true;
-      Serial.print("coked, sucess");
+      Serial.print("[SYSTEM]coked, sucess");
     }
   }
 
@@ -75,14 +123,14 @@ void runCSMA() {
         myLoRa.print(ammo);
         coked = false;
         ammo = ""
-        Serial.print(">>send success, currentMillis : ");
+        Serial.print("[SYSTEM]send success, currentMillis : ");
         Serial.print(currentMillis);
       }
       else //AUX핀이 LOW, 사용중인 경우
       {
         backOffEndTime = random(100,1000) + currentMillis; //백오프 설정
 
-        Serial.print(">>Channel is Full, BackoffTIme : ");
+        Serial.print("[SYSTEM]Channel is Full, BackoffTIme : ");
         Serial.print(backOffEndTime);
       }
     }
