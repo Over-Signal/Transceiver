@@ -116,18 +116,29 @@ void runCSMA() {
   //3. 송신--------------------------------------------------
   if((coked==true) && (currentMillis >= backOffEndTime))
   {
+    delay(random(100, 500)); //무작위 시간 뒤에 AUX핀을 확인함
       if(digitalRead(AUX_PIN) == HIGH) { //AUX핀이 HIGH면 사용가능
-        myLoRa.print(ammo);
-        coked = false;
-        ammo = "";
-        Serial.print("[SYSTEM]send success \ncurrentMillis : ");
-        Serial.print(currentMillis);
+        delay(random(100, 500)); //2중 검사    
+        if(digitalRead(AUX_PIN) == HIGH) { //AUX핀이 HIGH면 사용가능
+        
+          myLoRa.print(ammo);
+          coked = false;
+          ammo = "";
+          Serial.print("[SYSTEM]send success, currentMillis : ");
+          Serial.print(currentMillis); 
+        }
+        else{
+          backOffEndTime = random(100,1000) + currentMillis; //백오프 설정
+
+        Serial.print("[SYSTEM]Backoff By 2 check \nBackoffTIme : ");
+        Serial.print(backOffEndTime);
+        }
       }
       else //AUX핀이 LOW, 사용중인 경우
       {
         backOffEndTime = random(100,1000) + currentMillis; //백오프 설정
 
-        Serial.print("[SYSTEM]Channel is Full \nBackoffTIme : ");
+        Serial.print("[SYSTEM]Backoff By 1 check \nBackoffTIme : ");
         Serial.print(backOffEndTime);
       }
     }
