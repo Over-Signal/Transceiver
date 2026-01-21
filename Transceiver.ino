@@ -1,18 +1,11 @@
 #include <SoftwareSerial.h>
 
-
 // RX: 2번, TX: 3번 (E22의 TX, RX와 교차 연결)
 SoftwareSerial myLoRa(2, 3); 
 #define M0_PIN 7
 #define M1_PIN 6
 #define AUX_PIN 4
-
-
-#define USE_TDMA 0
-
-#define GUARD_TIME 100 //ms, for TDMA
-
-#define THIS_NOD_NUM 1 //for TDMA
+#define NODE_ID 0
 
 String ammo = "";
 bool coked = false;
@@ -39,11 +32,7 @@ void setup() {
   // [수정 1] 시스템 시작 메시지를 setup()으로 이동하여 한 번만 출력
   Serial.println(); // 초기 공백
   Serial.println(F("[SYSTEM] Arduino LoRa Node Started"));
-  if(USE_TDMA){
-    Serial.println(F("[SYSTEM] Mode: TDMA Activated"));
-  } else {
-    Serial.println(F("[SYSTEM] Mode: CSMA Activated"));
-  }
+  Serial.println(F("[SYSTEM] Mode: CSMA Activated"));
   Serial.println(F("[SYSTEM] Waiting for input..."));
 }
 
@@ -68,88 +57,59 @@ void receiver()
 
 void chamber() 
 {
+  unsigned long currentMillis = millis();
+
   if(Serial.available()>0 && coked == false){
     delay(10); //안정성
     ammo = Serial.readStringUntil('\n');
 
     if(ammo.length()>0) {
       coked = true;
-      Serial.print("[SYSTEM]coked, sucess\n");
+      Serial.print("[COKED], currentMillis : ");
+      Serial.print(currentMillis);
+      Serial.print("\n");
     }
   }
 }
 
-void runTDMA() {
+void trySend()
+{
+  if(coked==false) { return; }
   
+  unsigned long currentMillis = millis();
+  unsigned long receiverTime = random((NODE_ID+1)*200, (NODE_ID+2)*200) + currentMillis; //노드에 따른 체널 분리, 랜덤은 완충 역할
+
+  while (receiverTime >= millis()) { receiver(); } //쏠게 있는 경우 잠깐 듣기만 하다가 체널검사하고,  
   
-  receiver();
-  chamber();
+  if(digitalRead(AUX_PIN)==LOW) { backOffEndTime = random(50, 100) + currentMillis; Serial.print("[SEND_FAIL], backOff\n"); return; } //백오프 설정
+  if(backOffEndTime >= currentMillis) { return; }
+  
+  myLoRa.print(ammo);
+  coked = false;
+  ammo = "";
+  Serial.print("[SEND_SUCSSES], currentMillis : ");
+  Serial.print(currentMillis);
 
-  //3. 송신-----------------------------------
-  //장전이 되어있다면, 타임슬롯을 생성 지금 타임 슬롯을 확인하여 
-  //자신이 지금 말해도 되는 타임 슬롯이라면 송신!
-  if(coked == true){
-    
-    unsigned long currentTime = millis(); //디버그용 사실 쓸모는 없음
-    
-    int timeSlot = (millis()/1000)%4+1;  //1~4 4개의 1초 짜리 타임 슬롯
-    int timeInSlot = (millis()%1000); //슬롯 내부 시간
+}
 
-    if( (timeSlot == THIS_NOD_NUM) && timeInSlot >= GUARD_TIME ) { //슬롯 내부에서 타임가드 100ms 이후에 출발
-
-      myLoRa.print(ammo);
-      coked = false;
-      ammo = "";
-      Serial.print("[SYSTEM]send success, currentMillis : ");
-      Serial.print(currentTime);      
-    }
+void printSerial()
+{
+  int sectime = millis()/1000;
+  static int prvtime = 0;
+  if(prvtime < sectime){
+    Serial.println(sectime);
+    prvtime = sectime;
   }
 }
 
 void runCSMA() {
-
-  unsigned long currentMillis = millis();
-
+  //printSerial();
   receiver();
   chamber();
-
-  //3. 송신--------------------------------------------------
-  if((coked==true) && (currentMillis >= backOffEndTime))
-  {
-    delay(random(100, 500)); //무작위 시간 뒤에 AUX핀을 확인함
-      if(digitalRead(AUX_PIN) == HIGH) { //AUX핀이 HIGH면 사용가능
-        delay(random(100, 500)); //2중 검사    
-        if(digitalRead(AUX_PIN) == HIGH) { //AUX핀이 HIGH면 사용가능
-        
-          myLoRa.print(ammo);
-          coked = false;
-          ammo = "";
-          Serial.print("[SYSTEM]send success, currentMillis : ");
-          Serial.print(currentMillis); 
-        }
-        else{
-          backOffEndTime = random(100,1000) + currentMillis; //백오프 설정
-
-        Serial.print("[SYSTEM]Backoff By 2 check \nBackoffTIme : ");
-        Serial.print(backOffEndTime);
-        }
-      }
-      else //AUX핀이 LOW, 사용중인 경우
-      {
-        backOffEndTime = random(100,1000) + currentMillis; //백오프 설정
-
-        Serial.print("[SYSTEM]Backoff By 1 check \nBackoffTIme : ");
-        Serial.print(backOffEndTime);
-      }
-    }
+  trySend();
+  
 }
 
 void loop() {
-
-  if(USE_TDMA){
-    runTDMA();
-  }
-  else{
-    runCSMA();
-  }
+  runCSMA();
 }
