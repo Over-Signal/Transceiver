@@ -7,6 +7,7 @@ SoftwareSerial myLoRa(2, 3);
 #define M1_PIN 6
 #define AUX_PIN 4
 
+int TimeList[] = {50, 100, 150, 200};
 
 String ammo = "";
 bool coked = false;
@@ -42,7 +43,7 @@ void receiver()
     if(myLoRa.available() > 0){ 
     delay(10); // 데이터가 전송되는 동안 살짝 기다림 (안정성)
     String buff = myLoRa.readString();
-    Serial.print("[SYSTEM]get, sucess\n");
+    Serial.print("[RECEIVE_SUCESS]\n");
     
     for(int i=0; i < buff.length() - 1; i++){
       Serial.write(buff[i]); // PC로 한 글자씩 보냄
@@ -71,15 +72,14 @@ void chamber()
 
 void trySend()
 {
-  if(coked==false) { return; }
-  
   unsigned long currentMillis = millis();
-  unsigned long receiverTime = random(30, 100) + currentMillis;
-
-  while (receiverTime >= millis()) { receiver(); } //쏠게 있는 경우 잠깐 듣기만 하다가 체널검사하고,  
+  unsigned long receiverTime = TimeList[random()%4] + currentMillis;
   
+  if(coked==false) { return; }
   if(digitalRead(AUX_PIN)==LOW) { backOffEndTime = random(30, 50) + currentMillis; Serial.print("[SEND_FAIL], backOff\n"); return; } //백오프 설정
   if(backOffEndTime >= currentMillis) { return; }
+  
+  while (receiverTime >= millis()) { receiver(); } //쏠게 있는 경우 잠깐 듣기만 하다가 체널검사하고,  
   
   myLoRa.print(ammo);
   coked = false;
