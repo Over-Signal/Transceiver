@@ -1,23 +1,16 @@
 #include <SoftwareSerial.h>
 
-// ===== 핀 설정 =====
-SoftwareSerial myLoRa(2, 3); // RX, TX
+
+// RX: 2번, TX: 3번 (E22의 TX, RX와 교차 연결)
+SoftwareSerial myLoRa(2, 3); 
 #define M0_PIN 7
 #define M1_PIN 6
 #define AUX_PIN 4
 
-// ===== 노드 설정 =====
-#define NODE_ID 1          // 노드마다 다르게
-#define MAX_RETRY 5
-#define ACK_TIMEOUT 200    // ms
 
-// ===== 상태 변수 =====
 String ammo = "";
 bool coked = false;
-
-int seqNum = 0;
-int retryCount = 0;
-unsigned long backOffEndTime = 0;
+unsigned long backOffEndTime = 0; //for CSMA
 
 void setup() {
   Serial.begin(9600);
@@ -29,104 +22,81 @@ void setup() {
 
   digitalWrite(M0_PIN, LOW);
   digitalWrite(M1_PIN, LOW);
+  
+  //Serial.println("LoRa Sender Ready!");
+  delay(1000); // 모듈 안정화 대기
+  Serial.setTimeout(50);//입력버퍼 대기 default 500ms
+  myLoRa.setTimeout(50);//LoRa버퍼 50ms
+  
+  randomSeed(analogRead(A0));
 
-  randomSeed(analogRead(A0) + millis());
-
-  Serial.println("[SYSTEM] CSMA + EXP BACKOFF + ACK START");
+  // [수정 1] 시스템 시작 메시지를 setup()으로 이동하여 한 번만 출력
+  Serial.println(); // 초기 공백
+  Serial.println(F("[SYSTEM] Arduino LoRa Node Started"));
+  Serial.println(F("[SYSTEM] Mode: CSMA Activated"));
+  Serial.println(F("[SYSTEM] Waiting for input..."));
 }
 
-// ================= 수신 =================
-void receiver() {
-  if (myLoRa.available()) {
-    delay(10);
-    String pkt = myLoRa.readString();
-
-    // ACK 수신
-    if (pkt.startsWith("ACK")) {
-      Serial.println("[SYSTEM] ACK RECEIVED");
-      coked = false;
-      retryCount = 0;
-      ammo = "";
-      return;
+void receiver() 
+{
+    if(myLoRa.available() > 0){ 
+    delay(10); // 데이터가 전송되는 동안 살짝 기다림 (안정성)
+    String buff = myLoRa.readString();
+    Serial.print("[SYSTEM]get, sucess\n");
+    
+    for(int i=0; i < buff.length() - 1; i++){
+      Serial.write(buff[i]); // PC로 한 글자씩 보냄
     }
 
-    // 데이터 수신
-    Serial.print("[RECV] ");
-    Serial.println(pkt);
+    char raw_rssi = buff.charAt(buff.length() - 1);
 
-    // ACK 응답
-    if (pkt.indexOf("SEQ=") != -1) {
-      String ack = "ACK:NODE=" + String(NODE_ID);
-      myLoRa.print(ack);
-    }
+    int rssi_dbm = (uint8_t)raw_rssi - 256;
+    Serial.print('/');
+    Serial.println(rssi_dbm);
   }
 }
 
-// ================= 입력 =================
-void chamber() {
-  if (Serial.available() && !coked) {
+void chamber() 
+{
+  if(Serial.available()>0 && coked == false){
+    delay(10); //안정성
     ammo = Serial.readStringUntil('\n');
-    if (ammo.length() > 0) {
+
+    if(ammo.length()>0) {
       coked = true;
-      seqNum++;
-      retryCount = 0;
-      Serial.println("[SYSTEM] CHAMBERED");
+      Serial.print("[COKED]\n");
     }
   }
 }
 
-// ================= 송신 =================
-void trySend() {
-  if (!coked) return;
-  if (millis() < backOffEndTime) return;
+void trySend()
+{
+  if(coked==false) { return; }
+  
+  unsigned long currentMillis = millis();
+  unsigned long receiverTime = random(30, 100) + currentMillis;
 
-  if (digitalRead(AUX_PIN) == LOW) {
-    setBackoff();
-    return;
-  }
+  while (receiverTime >= millis()) { receiver(); } //쏠게 있는 경우 잠깐 듣기만 하다가 체널검사하고,  
+  
+  if(digitalRead(AUX_PIN)==LOW) { backOffEndTime = random(30, 50) + currentMillis; Serial.print("[SEND_FAIL], backOff\n"); return; } //백오프 설정
+  if(backOffEndTime >= currentMillis) { return; }
+  
+  myLoRa.print(ammo);
+  coked = false;
+  ammo = "";
+  Serial.print("[SEND_SUCSSES], currentMillis : ");
+  Serial.print(currentMillis);
 
-  String packet = "NODE=" + String(NODE_ID) +
-                  ",SEQ=" + String(seqNum) +
-                  ",DATA=" + ammo;
-
-  myLoRa.print(packet);
-  Serial.println("[SEND] " + packet);
-
-  // ===== ACK 대기 =====
-  unsigned long waitStart = millis();
-  while (millis() - waitStart < ACK_TIMEOUT) {
-    receiver();
-  }
-
-  // ACK 실패 → 백오프
-  retryCount++;
-  if (retryCount >= MAX_RETRY) {
-    Serial.println("[SYSTEM] DROP PACKET");
-    coked = false;
-    retryCount = 0;
-    return;
-  }
-
-  setBackoff();
 }
 
-// ================= 지수 백오프 =================
-void setBackoff() {
-  unsigned long delayTime =
-    random((1 << retryCount) * 100,
-           (1 << retryCount) * 300);
+void runCSMA() {
 
-  backOffEndTime = millis() + delayTime;
-
-  Serial.print("[BACKOFF] retry=");
-  Serial.print(retryCount);
-  Serial.print(" wait=");
-  Serial.println(delayTime);
-}
-
-// ================= 메인 루프 =================
-void loop() {
   receiver();
   chamber();
   trySend();
+  
+}
+
+void loop() {
+  runCSMA();
 }
