@@ -5,11 +5,13 @@ SoftwareSerial myLoRa(2, 3);
 #define M0_PIN 7
 #define M1_PIN 6
 #define AUX_PIN 4
-#define NODE_ID 0
+
 
 String ammo = "";
 bool coked = false;
 unsigned long backOffEndTime = 0; //for CSMA
+
+int nodeID = 0;
 
 void setup() {
   Serial.begin(9600);
@@ -36,6 +38,15 @@ void setup() {
   Serial.println(F("[SYSTEM] Waiting for input..."));
 }
 
+void command(char com[]){
+  switch(com[2]){
+    case 0:
+      //node id
+      nodeID = com[4];
+      break;
+  }
+}
+
 void receiver() 
 {
     if(myLoRa.available() > 0){ 
@@ -57,12 +68,18 @@ void receiver()
 
 void chamber() 
 {
+  String ammo;
+  char array[20];
   unsigned long currentMillis = millis();
 
   if(Serial.available()>0 && coked == false){
     delay(10); //안정성
     ammo = Serial.readStringUntil('\n');
 
+    if (ammo[0] == 'C'){
+      ammo.toCharArray(array);
+      command()
+    }
     if(ammo.length()>0) {
       coked = true;
       Serial.print("[COKED], currentMillis : ");
@@ -77,7 +94,7 @@ void trySend()
   if(coked==false) { return; }
   
   unsigned long currentMillis = millis();
-  unsigned long receiverTime = random((NODE_ID+1)*200, (NODE_ID+2)*200) + currentMillis; //노드에 따른 체널 분리, 랜덤은 완충 역할
+  unsigned long receiverTime = random((nodeID+1)*200, (nodeID+2)*200) + currentMillis; //노드에 따른 체널 분리, 랜덤은 완충 역할
 
   while (receiverTime >= millis()) { receiver(); } //쏠게 있는 경우 잠깐 듣기만 하다가 체널검사하고,  
   
