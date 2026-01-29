@@ -15,11 +15,11 @@ unsigned long backOffEndTime = 0; //for CSMA 4byte
 
 uint8_t nodeID = 0;
 
-uint8_t get_pointer(uint8_t* pointer){
-  uint8_t returnValue = *pointer;
-  *pointer = (*pointer + 1) % 6;
-  return returnValue;
-}
+void receiver();
+void chamber();
+void trySend();
+void command(char com[]);
+uint8_t get_pointer(uint8_t* pointer);
 
 void setup() {
   Serial.begin(9600);
@@ -46,38 +46,43 @@ void setup() {
   // Serial.println(F("[SYSTEM] Waiting for input..."));
 }
 
-void command(String com){
-  String perfix_command, data;
-  int id_command;
-  char buff[15];
-  com.toCharArray(buff, 15);
+void loop() {
+  //printSerial();
+  receiver();
+  chamber();
+  trySend();
+}
 
-  perfix_command = strtok(buff, "$");
+void command(char com[]){
+  char perfix_command, data, buff[15];
+  int id_command;
+
+  perfix_command = *strtok(com, "$");
   id_command = atoi(strtok(NULL, "$"));
-  data = strtok(NULL, "$");
 
   switch(id_command){
     case 0:
       //node id
-      nodeID = data.toInt();
-      Serial.println(nodeID);
+      nodeID = atoi(strtok(NULL, "$"));
+      //Serial.println(nodeID);
       break;
   }
 }
 
-void receiver() 
+void receiver()
 {
     if(myLoRa.available() > 0){ 
     delay(10); // 데이터가 전송되는 동안 살짝 기다림 (안정성)
-    String buff = myLoRa.readString();
+    char buff[128];
+    uint8_t readbyte = myLoRa.readBytesUntil('\n', buff, 127);
+    buff[readbyte] = '\0';
     // Serial.print("[SYSTEM]get, sucess\n");
     
-    for(int i=0; i < buff.length() - 1; i++){
+    for(int i=0; i < strlen(buff) - 1; i++){
       Serial.write(buff[i]); // PC로 한 글자씩 보냄
     }
 
-    char raw_rssi = buff.charAt(buff.length() - 1);
-
+    char raw_rssi = buff[readbyte - 1];
     int rssi_dbm = (uint8_t)raw_rssi - 256;
     Serial.print('/');
     Serial.println(rssi_dbm);
@@ -147,9 +152,8 @@ void printSerial()
   }
 }
 
-void loop() {
-  //printSerial();
-  receiver();
-  chamber();
-  trySend();
+uint8_t get_pointer(uint8_t* pointer){
+  uint8_t returnValue = *pointer;
+  *pointer = (*pointer + 1) % 6;
+  return returnValue;
 }
