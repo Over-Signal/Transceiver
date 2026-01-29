@@ -6,12 +6,20 @@ SoftwareSerial myLoRa(2, 3);
 #define M1_PIN 6
 #define AUX_PIN 4
 
+char send_q[5][128]; //128*5 = 640byte
+uint8_t send_q_head_pointer = 0; //1byte
+uint8_t send_q_tail_pointer = 0;
 
-String ammo = "";
 bool coked = false;
-unsigned long backOffEndTime = 0; //for CSMA
+unsigned long backOffEndTime = 0; //for CSMA 4byte
 
 uint8_t nodeID = 0;
+
+uint8_t get_pointer(uint8_t* pointer){
+  uint8_t returnValue = *pointer;
+  *pointer = (*pointer + 1) % 6;
+  return returnValue;
+}
 
 void setup() {
   Serial.begin(9600);
@@ -78,18 +86,23 @@ void receiver()
 
 void chamber() 
 {
-  String ammo;
-  unsigned long currentMillis = millis();
+  //unsigned long currentMillis = millis();
+  char temp_buffer[128];
 
   if(Serial.available()>0 && coked == false){
     delay(10); //안정성
-    ammo = Serial.readStringUntil('\n');
-    if (ammo[0] == 'C'){
-      command(ammo);
-      ammo="";
+    //send_q[send_q_pointer] = Serial.readStringUntil('\n');
+
+    uint8_t readbyte = Serial.readBytesUntil('\n', temp_buffer, 127);
+    temp_buffer[readbyte] = '\0';
+
+    if (temp_buffer[0] == 'C'){
+      command(temp_buffer);
       return;
     }
-    if(ammo.length()>0) {
+    if(readbyte > 0) {
+      uint8_t tailPointer = get_pointer(&send_q_tail_pointer);
+      strcpy(send_q[tailPointer], temp_buffer);
       coked = true;
       // Serial.print("[COKED], currentMillis : ");
       // Serial.print(currentMillis);
@@ -116,13 +129,12 @@ void trySend()
   } //백오프 설정
 
   if(backOffEndTime >= currentMillis) { return; }
-  
-  myLoRa.print(ammo);
+  uint8_t headPointer = get_pointer(&send_q_head_pointer);
+  myLoRa.print(send_q[headPointer]);
   coked = false;
-  ammo = "";
+  send_q[headPointer];
   // Serial.print("[SEND_SUCSSES], currentMillis : ");
   // Serial.print(currentMillis);
-
 }
 
 void printSerial()
