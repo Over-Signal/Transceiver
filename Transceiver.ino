@@ -32,7 +32,7 @@ void setup() {
   digitalWrite(M0_PIN, LOW);
   digitalWrite(M1_PIN, LOW);
   
-  Serial.println("LoRa Sender Ready!");
+  // Serial.println("LoRa Sender Ready!");
   delay(1000); // 모듈 안정화 대기
   Serial.setTimeout(50);//입력버퍼 대기 default 500ms
   myLoRa.setTimeout(50);//LoRa버퍼 50ms
@@ -64,7 +64,7 @@ void command(char com[]){
     case 0:
       //node id
       nodeID = atoi(strtok(NULL, "$"));
-      Serial.println(nodeID);
+      // Serial.println(nodeID);
       break;
   }
 }
