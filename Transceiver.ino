@@ -40,10 +40,10 @@ void setup() {
   randomSeed(analogRead(A0));
 
   // [수정 1] 시스템 시작 메시지를 setup()으로 이동하여 한 번만 출력
-  Serial.println(); // 초기 공백
-  Serial.println(F("[SYSTEM] Arduino LoRa Node Started"));
-  Serial.println(F("[SYSTEM] Mode: CSMA Activated"));
-  Serial.println(F("[SYSTEM] Waiting for input..."));
+  // Serial.println(); // 초기 공백
+  // Serial.println(F("[SYSTEM] Arduino LoRa Node Started"));
+  // Serial.println(F("[SYSTEM] Mode: CSMA Activated"));
+  // Serial.println(F("[SYSTEM] Waiting for input..."));
 }
 
 void loop() {
@@ -76,7 +76,7 @@ void receiver()
     char buff[128];
     uint8_t readbyte = myLoRa.readBytesUntil('\n', buff, 127);
     buff[readbyte] = '\0';
-    Serial.print("[SYSTEM]get, sucess\n");
+    // Serial.print("[SYSTEM]get, sucess\n");
     
     for(int i=0; i < strlen(buff) - 1; i++){
       Serial.write(buff[i]); // PC로 한 글자씩 보냄
@@ -107,8 +107,6 @@ void chamber()
     }
     if(readbyte > 0) {
       uint8_t tailPointer = get_pointer(&send_q_tail_pointer);
-      Serial.print("tailPointer : ");
-      Serial.println(tailPointer);
       strcpy(send_q[tailPointer], temp_buffer);
       coked = true;
       // Serial.print("[COKED], currentMillis : ");
@@ -137,8 +135,6 @@ void trySend()
 
   if(backOffEndTime >= currentMillis) { return; }
   uint8_t headPointer = get_pointer(&send_q_head_pointer);
-  Serial.print("headPointer : ");
-  Serial.println(headPointer);
   myLoRa.print(send_q[headPointer]);
   coked = false;
   send_q[headPointer];
