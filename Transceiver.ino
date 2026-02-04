@@ -89,12 +89,20 @@ void receiver()
   }
 }
 
+bool isQueueEmpty() {
+  return send_q_head_pointer == send_q_tail_pointer;
+}
+
+bool isQueueFull() {
+  return ((send_q_tail_pointer + 1) % 5) == send_q_head_pointer;
+}
+
 void chamber() 
 {
   //unsigned long currentMillis = millis();
   char temp_buffer[128];
 
-  if(Serial.available()>0 && coked == false){
+  if(Serial.available()>0 && !isQueueFull()){
     delay(10); //안정성
     //send_q[send_q_pointer] = Serial.readStringUntil('\n');
 
@@ -116,9 +124,10 @@ void chamber()
   }
 }
 
+
 void trySend()
 {
-  if(coked==false) { return; }
+  if(isQueueEmpty()) { return; }
   
   unsigned long currentMillis = millis();
   unsigned long receiverTime = random((nodeID+1)*200, (nodeID+2)*200) + currentMillis; //노드에 따른 체널 분리, 랜덤은 완충 역할
