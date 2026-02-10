@@ -49,10 +49,10 @@ void setup() {
   randomSeed(analogRead(A0));
 
   // [TEST] 시스템 시작 메시지 활성화
-  Serial.println(); 
-  Serial.println(F("[SYSTEM] Arduino LoRa Node Started"));
-  Serial.println(F("[SYSTEM] Mode: TDMA (Sync Relay)"));
-  Serial.println(F("[SYSTEM] Waiting for input..."));
+  //Serial.println(); 
+  //Serial.println(F("[SYSTEM] Arduino LoRa Node Started"));
+  //Serial.println(F("[SYSTEM] Mode: TDMA (Sync Relay)"));
+  //Serial.println(F("[SYSTEM] Waiting for input..."));
 }
 
 void loop() {
@@ -81,8 +81,8 @@ void command(char com[]){
     case 0:
       nodeID = atoi(strtok(NULL, "$"));
       // [TEST] 노드 ID 설정 확인
-      Serial.print("[SYSTEM] Set Node ID: ");
-      Serial.println(nodeID);
+      //Serial.print("[SYSTEM] Set Node ID: ");
+      //Serial.println(nodeID);
       break;
   }
 }
@@ -100,27 +100,28 @@ void receiver()
       if (nodeID != 0) { 
         lastSyncTime = millis(); 
         // [TEST] 동기화 수신 확인
-        Serial.println("[SYSTEM] Synced with Master");
+        //Serial.println("[SYSTEM] Synced with Master");
       }
       return; 
     }
 
     // [TEST] 수신 성공 메시지
-    Serial.print("[SYSTEM] get, success: ");
+    //Serial.print("[SYSTEM] get, success: ");
     
     // 데이터 PC로 전송
     for(int i=0; i < readbyte; i++){ 
       Serial.write(buff[i]); 
     }
-    Serial.println(); // 줄바꿈
+    //Serial.println(); // 줄바꿈
 
     // RSSI 출력 (기존 로직)
-    /*
+
+    
     char raw_rssi = buff[readbyte - 1]; 
     int rssi_dbm = (uint8_t)raw_rssi - 256;
     Serial.print('/');
     Serial.println(rssi_dbm);
-    */
+    
   }
 }
 
@@ -128,7 +129,7 @@ void sendSyncPacket() {
   if(digitalRead(AUX_PIN) == HIGH) {
     myLoRa.println("SYNC"); 
     // [TEST] 마스터 동기화 패킷 전송 확인
-    Serial.println("[SYSTEM] Master sent SYNC");
+    //Serial.println("[SYSTEM] Master sent SYNC");
   }
 }
 
@@ -159,10 +160,10 @@ void chamber()
       coked = true;
       
       // [TEST] 큐 적재 확인
-      Serial.print("[COKED] Queue Added. Head: ");
-      Serial.print(send_q_head_pointer);
-      Serial.print(" Tail: ");
-      Serial.println(send_q_tail_pointer);
+      //Serial.print("[COKED] Queue Added. Head: ");
+      //Serial.print(send_q_head_pointer);
+      //Serial.print(" Tail: ");
+      //Serial.println(send_q_tail_pointer);
     }
   }
 }
@@ -176,7 +177,7 @@ void trySend()
   // 동기화 대기 (Node 0 제외)
   if (nodeID != 0 && lastSyncTime == 0) {
      // [TEST] 동기화 대기 중 알림 (너무 자주 뜨면 주석 처리)
-     // Serial.println("[WAIT] Waiting for SYNC..."); 
+     //Serial.println("[WAIT] Waiting for SYNC..."); 
      return; 
   }
 
@@ -196,8 +197,8 @@ void trySend()
         coked = false;
         
         // [TEST] 전송 성공 확인
-        Serial.print("[SEND_SUCCESS] Time: ");
-        Serial.println(currentMillis);
+        //Serial.print("[SEND_SUCCESS] Time: ");
+        //Serial.println(currentMillis);
       }
   }
 }
