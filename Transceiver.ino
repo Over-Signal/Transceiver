@@ -6,20 +6,30 @@ SoftwareSerial myLoRa(2, 3);
 #define M1_PIN 6
 #define AUX_PIN 4
 
+// ================= [TDMA 설정] =================
+#define TOTAL_NODES 4           // 전체 노드 수
+#define SLOT_TIME 3000          // 각 노드당 할당 시간 (ms)
+#define GUARD_TIME 500          // 앞뒤 여유 시간 (ms)
+#define CYCLE_TIME (TOTAL_NODES * SLOT_TIME) // 전체 주기 (12초)
+
+unsigned long lastSyncTime = 0; // 마지막으로 동기화된 시간
+// ===============================================
+
 char send_q[5][128]; //128*5 = 640byte
 uint8_t send_q_head_pointer = 0; //1byte
 uint8_t send_q_tail_pointer = 0;
 
 bool coked = false;
-unsigned long backOffEndTime = 0; //for CSMA 4byte
+unsigned long backOffEndTime = 0; // CSMA용 변수 남겨둠 (필요시 사용)
 
-uint8_t nodeID = 0;
+uint8_t nodeID = 0; 
 
 void receiver();
 void chamber();
 void trySend();
 void command(char com[]);
 uint8_t get_pointer(uint8_t* pointer);
+void sendSyncPacket();
 
 void setup() {
   Serial.begin(9600);
@@ -32,60 +42,93 @@ void setup() {
   digitalWrite(M0_PIN, LOW);
   digitalWrite(M1_PIN, LOW);
   
-  // Serial.println("LoRa Sender Ready!");
-  delay(1000); // 모듈 안정화 대기
-  Serial.setTimeout(50);//입력버퍼 대기 default 500ms
-  myLoRa.setTimeout(50);//LoRa버퍼 50ms
+  delay(1000); 
+  Serial.setTimeout(50);
+  myLoRa.setTimeout(50);
   
   randomSeed(analogRead(A0));
 
-  // [수정 1] 시스템 시작 메시지를 setup()으로 이동하여 한 번만 출력
-  // Serial.println(); // 초기 공백
-  // Serial.println(F("[SYSTEM] Arduino LoRa Node Started"));
-  // Serial.println(F("[SYSTEM] Mode: CSMA Activated"));
-  // Serial.println(F("[SYSTEM] Waiting for input..."));
+  // [TEST] 시스템 시작 메시지 활성화
+  Serial.println(); 
+  Serial.println(F("[SYSTEM] Arduino LoRa Node Started"));
+  Serial.println(F("[SYSTEM] Mode: TDMA (Sync Relay)"));
+  Serial.println(F("[SYSTEM] Waiting for input..."));
 }
 
 void loop() {
-  //printSerial();
+  // Node 0번은 주기적으로 SYNC 패킷 방송
+  if (nodeID == 0) {
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastSyncTime >= CYCLE_TIME) {
+      sendSyncPacket();
+      lastSyncTime = currentMillis; 
+    }
+  }
+
   receiver();
   chamber();
   trySend();
 }
 
 void command(char com[]){
-  char perfix_command, data, buff[15];
+  char perfix_command;
   int id_command;
 
-  perfix_command = *strtok(com, "$");
+  perfix_command = *strtok(com, "$"); 
   id_command = atoi(strtok(NULL, "$"));
 
   switch(id_command){
     case 0:
-      //node id
       nodeID = atoi(strtok(NULL, "$"));
-      // Serial.println(nodeID);
+      // [TEST] 노드 ID 설정 확인
+      Serial.print("[SYSTEM] Set Node ID: ");
+      Serial.println(nodeID);
       break;
   }
 }
 
 void receiver()
 {
-    if(myLoRa.available() > 0){ 
-    delay(10); // 데이터가 전송되는 동안 살짝 기다림 (안정성)
+  if(myLoRa.available() > 0){ 
+    delay(10); 
     char buff[128];
     uint8_t readbyte = myLoRa.readBytesUntil('\n', buff, 127);
     buff[readbyte] = '\0';
-    // Serial.print("[SYSTEM]get, sucess\n");
     
-    for(int i=0; i < strlen(buff) - 1; i++){
-      Serial.write(buff[i]); // PC로 한 글자씩 보냄
+    // SYNC 패킷 확인
+    if (strncmp(buff, "SYNC", 4) == 0) {
+      if (nodeID != 0) { 
+        lastSyncTime = millis(); 
+        // [TEST] 동기화 수신 확인
+        Serial.println("[SYSTEM] Synced with Master");
+      }
+      return; 
     }
 
-    char raw_rssi = buff[readbyte - 1];
+    // [TEST] 수신 성공 메시지
+    Serial.print("[SYSTEM] get, success: ");
+    
+    // 데이터 PC로 전송
+    for(int i=0; i < readbyte; i++){ 
+      Serial.write(buff[i]); 
+    }
+    Serial.println(); // 줄바꿈
+
+    // RSSI 출력 (기존 로직)
+    /*
+    char raw_rssi = buff[readbyte - 1]; 
     int rssi_dbm = (uint8_t)raw_rssi - 256;
     Serial.print('/');
     Serial.println(rssi_dbm);
+    */
+  }
+}
+
+void sendSyncPacket() {
+  if(digitalRead(AUX_PIN) == HIGH) {
+    myLoRa.println("SYNC"); 
+    // [TEST] 마스터 동기화 패킷 전송 확인
+    Serial.println("[SYSTEM] Master sent SYNC");
   }
 }
 
@@ -99,13 +142,10 @@ bool isQueueFull() {
 
 void chamber() 
 {
-  //unsigned long currentMillis = millis();
   char temp_buffer[128];
 
   if(Serial.available()>0 && !isQueueFull()){
-    delay(10); //안정성
-    //send_q[send_q_pointer] = Serial.readStringUntil('\n');
-
+    delay(10); 
     uint8_t readbyte = Serial.readBytesUntil('\n', temp_buffer, 127);
     temp_buffer[readbyte] = '\0';
 
@@ -117,47 +157,48 @@ void chamber()
       uint8_t tailPointer = get_pointer(&send_q_tail_pointer);
       strcpy(send_q[tailPointer], temp_buffer);
       coked = true;
-      // Serial.print("[COKED], currentMillis : ");
-      // Serial.print(currentMillis);
-      // Serial.print("\n");
+      
+      // [TEST] 큐 적재 확인
+      Serial.print("[COKED] Queue Added. Head: ");
+      Serial.print(send_q_head_pointer);
+      Serial.print(" Tail: ");
+      Serial.println(send_q_tail_pointer);
     }
   }
 }
-
 
 void trySend()
 {
   if(isQueueEmpty()) { return; }
   
   unsigned long currentMillis = millis();
-  unsigned long receiverTime = random((nodeID+1)*200, (nodeID+2)*200) + currentMillis; //노드에 따른 체널 분리, 랜덤은 완충 역할
 
-  while (receiverTime >= millis()) { 
-    receiver();
-  } //쏠게 있는 경우 잠깐 듣기만 하다가 체널검사하고,  
+  // 동기화 대기 (Node 0 제외)
+  if (nodeID != 0 && lastSyncTime == 0) {
+     // [TEST] 동기화 대기 중 알림 (너무 자주 뜨면 주석 처리)
+     // Serial.println("[WAIT] Waiting for SYNC..."); 
+     return; 
+  }
+
+  unsigned long timeSinceSync = currentMillis - lastSyncTime;
+  unsigned long timeInCycle = timeSinceSync % CYCLE_TIME; 
   
-  if(digitalRead(AUX_PIN)==LOW) { 
-    backOffEndTime = random(50, 100) + currentMillis;
-    //Serial.print("[SEND_FAIL], backOff\n");
-    return; 
-  } //백오프 설정
+  unsigned long mySlotStart = nodeID * SLOT_TIME; 
+  unsigned long mySlotEnd = (nodeID + 1) * SLOT_TIME;
 
-  if(backOffEndTime >= currentMillis) { return; }
-  uint8_t headPointer = get_pointer(&send_q_head_pointer);
-  myLoRa.print(send_q[headPointer]);
-  coked = false;
-  send_q[headPointer];
-  // Serial.print("[SEND_SUCSSES], currentMillis : ");
-  // Serial.print(currentMillis);
-}
-
-void printSerial()
-{
-  int sectime = millis()/1000;
-  static int prvtime = 0;
-  if(prvtime < sectime){
-    Serial.println(sectime);
-    prvtime = sectime;
+  // 내 슬롯 + 가드타임 체크
+  if (timeInCycle > (mySlotStart + GUARD_TIME) && 
+      timeInCycle < (mySlotEnd - GUARD_TIME)) {
+      
+      if(digitalRead(AUX_PIN) == HIGH) { 
+        uint8_t headPointer = get_pointer(&send_q_head_pointer);
+        myLoRa.println(send_q[headPointer]); 
+        coked = false;
+        
+        // [TEST] 전송 성공 확인
+        Serial.print("[SEND_SUCCESS] Time: ");
+        Serial.println(currentMillis);
+      }
   }
 }
 
