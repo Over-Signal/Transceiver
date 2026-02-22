@@ -1,35 +1,36 @@
+/*
+ * Gemini CLI - Transceiver Firmware (User Style)
+ * Protocol: TDMA with Timestamp Sync
+ */
 #include <SoftwareSerial.h>
 
-// RX: 2번, TX: 3번 (E22의 TX, RX와 교차 연결)
-SoftwareSerial myLoRa(2, 3); 
+// HW연결
+SoftwareSerial myLoRa(2, 3); // RX, TX
 #define M0_PIN 7
 #define M1_PIN 6
-#define AUX_PIN 4
 
-// ================= [TDMA 설정] =================
-#define TOTAL_NODES 4           // 전체 노드 수
-#define SLOT_TIME 3000          // 각 노드당 할당 시간 (ms)
-#define GUARD_TIME 500          // 앞뒤 여유 시간 (ms)
-#define CYCLE_TIME (TOTAL_NODES * SLOT_TIME) // 전체 주기 (12초)
+// TDMA 슬롯 설정
+const long SLOT_DURATION = 400;
+const long TOTAL_NODES = 4;
+const long CYCLE_DURATION = SLOT_DURATION * TOTAL_NODES; // 1600 ms
 
-unsigned long lastSyncTime = 0; // 마지막으로 동기화된 시간
-// ===============================================
+long localOffset = 0; // 동기화용 오프셋
+int nodeID = -1;      // 초기값 -1 (PC로부터 할당 대기)
 
-char send_q[5][128]; //128*5 = 640byte
-uint8_t send_q_head_pointer = 0; //1byte
-uint8_t send_q_tail_pointer = 0;
+// 챔버(Queue) 설정
+char send_q[5][128]; // 128byte * 5
+uint8_t send_q_head = 0; // Pop 위치
+uint8_t send_q_tail = 0; // Push 위치
 
-bool coked = false;
-unsigned long backOffEndTime = 0; // CSMA용 변수 남겨둠 (필요시 사용)
-
-uint8_t nodeID = 0; 
-
+// 함수 원형
 void receiver();
 void chamber();
 void trySend();
 void command(char com[]);
-uint8_t get_pointer(uint8_t* pointer);
-void sendSyncPacket();
+bool isQueueEmpty();
+bool isQueueFull();
+uint8_t get_next_pointer(uint8_t pointer);
+void processSync(char* packet, unsigned long arrivalTime, char** dataStartPtr);
 
 void setup() {
   Serial.begin(9600);
@@ -37,174 +38,183 @@ void setup() {
 
   pinMode(M0_PIN, OUTPUT);
   pinMode(M1_PIN, OUTPUT);
-  pinMode(AUX_PIN, INPUT);
 
   digitalWrite(M0_PIN, LOW);
   digitalWrite(M1_PIN, LOW);
   
-  delay(1000); 
-  Serial.setTimeout(50);
-  myLoRa.setTimeout(50);
+  delay(1000); // 모듈 안정화
+  
+  Serial.setTimeout(50); // PC 입력 대기 타임아웃
+  myLoRa.setTimeout(50); // LoRa 수신 타임아웃
   
   randomSeed(analogRead(A0));
-
-  // [TEST] 시스템 시작 메시지 활성화
-  //Serial.println(); 
-  //Serial.println(F("[SYSTEM] Arduino LoRa Node Started"));
-  //Serial.println(F("[SYSTEM] Mode: TDMA (Sync Relay)"));
-  //Serial.println(F("[SYSTEM] Waiting for input..."));
 }
 
 void loop() {
-  // Node 0번은 주기적으로 SYNC 패킷 방송
-  if (nodeID == 0) {
-    unsigned long currentMillis = millis();
-    if (currentMillis - lastSyncTime >= CYCLE_TIME) {
-      sendSyncPacket();
-      lastSyncTime = currentMillis; 
-    }
-  }
-
-  receiver();
-  chamber();
-  trySend();
+  receiver(); // RF 수신 & 동기화
+  chamber();  // PC 입력 -> 큐 저장
+  trySend();  // TDMA 슬롯 체크 -> 큐 송신
 }
 
-void command(char com[]){
-  char perfix_command;
-  int id_command;
-
-  perfix_command = *strtok(com, "$"); 
-  id_command = atoi(strtok(NULL, "$"));
-
-  switch(id_command){
-    case 0:
-      nodeID = atoi(strtok(NULL, "$"));
-      // [TEST] 노드 ID 설정 확인
-      //Serial.print("[SYSTEM] Set Node ID: ");
-      //Serial.println(nodeID);
-      break;
-  }
-}
-
-void receiver()
-{
-  if(myLoRa.available() > 0){ 
-    delay(10); 
+// ==========================================
+// 1. 수신 및 동기화 (RF -> PC)
+// ==========================================
+void receiver() {
+  if (myLoRa.available() > 0) { 
+    delay(10); // 데이터 수신 대기
     char buff[128];
-    uint8_t readbyte = myLoRa.readBytesUntil('\n', buff, 127);
-    buff[readbyte] = '\0';
+    // 라인 단위 수신 (타임아웃 50ms)
+    int readLen = myLoRa.readBytesUntil('\n', buff, 127);
+    if (readLen <= 0) return;
+    buff[readLen] = '\0';
+
+    unsigned long arrivalTime = millis();
+
+    // [RSSI 처리] (유저 로직 유지: 마지막 바이트가 RSSI라고 가정 시)
+    // 실제 문자열 패킷이라면 마지막 바이트가 RSSI가 아닐 수 있으니 주의가 필요합니다.
+    // 여기서는 안전하게 문자열 파싱 후 별도 RSSI 로직을 적용하거나, 
+    // 유저분 코드처럼 마지막 바이트를 RSSI로 간주합니다.
+    int rssi_dbm = -50; // 기본값
+    // 만약 모듈이 RSSI를 마지막 바이트에 붙여준다면 아래 주석 해제:
+    // char raw_rssi = buff[readLen - 1];
+    // rssi_dbm = (uint8_t)raw_rssi - 256;
+    // buff[readLen - 1] = '\0'; // RSSI 바이트 제거 후 문자열 처리
     
-    // SYNC 패킷 확인
-    if (strncmp(buff, "SYNC", 4) == 0) {
-      if (nodeID != 0) { 
-        lastSyncTime = millis(); 
-        // [TEST] 동기화 수신 확인
-        //Serial.println("[SYSTEM] Synced with Master");
-      }
-      return; 
+    // [동기화 및 데이터 분리]
+    // 패킷 포맷: "Timestamp$ID$Route$Seq$Data"
+    char* dataStart = NULL;
+    processSync(buff, arrivalTime, &dataStart);
+
+    // [PC 전송] 
+    // 포맷: "ID$Route$Seq$Data/RSSI"
+    if (dataStart != NULL) {
+      Serial.print(dataStart);
+      Serial.print('/');
+      Serial.println(rssi_dbm);
     }
-
-    // [TEST] 수신 성공 메시지
-    //Serial.print("[SYSTEM] get, success: ");
-    
-    // 데이터 PC로 전송
-    for(int i=0; i < readbyte; i++){ 
-      Serial.write(buff[i]); 
-    }
-    //Serial.println(); // 줄바꿈
-
-    // RSSI 출력 (기존 로직)
-
-    
-    char raw_rssi = buff[readbyte - 1]; 
-    int rssi_dbm = (uint8_t)raw_rssi - 256;
-    Serial.print('/');
-    Serial.println(rssi_dbm);
-    
   }
 }
 
-void sendSyncPacket() {
-  if(digitalRead(AUX_PIN) == HIGH) {
-    myLoRa.println("SYNC"); 
-    // [TEST] 마스터 동기화 패킷 전송 확인
-    //Serial.println("[SYSTEM] Master sent SYNC");
+// 타임스탬프 파싱 및 시간 동기화 함수
+void processSync(char* packet, unsigned long arrivalTime, char** dataStartPtr) {
+  // 첫 번째 '$' 찾기
+  char* firstDollar = strchr(packet, '$');
+  
+  if (firstDollar != NULL) {
+    // 1. 타임스탬프 추출
+    *firstDollar = '\0'; // 잠시 문자열 분리
+    long receivedTime = atol(packet);
+    *firstDollar = '$'; // 복구
+    
+    // 2. 실제 데이터 시작 위치 (Timestamp$ 다음)
+    *dataStartPtr = firstDollar + 1;
+
+    // 3. 동기화 로직 (나는 Node 0이 아닐 때만)
+    if (nodeID != 0) {
+      // 현재 내 기준의 가상 시간
+      // long myVirtualTime = (arrivalTime + localOffset) % CYCLE_DURATION;
+      
+      // 목표: (arrivalTime + localOffset) % 1600 == receivedTime
+      // 즉, localOffset = receivedTime - (arrivalTime % 1600)
+      long targetOffset = receivedTime - (long)(arrivalTime % CYCLE_DURATION);
+      
+      // 급격한 변화 방지를 위해 점진적 보정(옵션) 혹은 즉시 적용
+      localOffset = targetOffset;
+    }
+  } else {
+    // 형식이 안 맞으면 전체를 데이터로 취급
+    *dataStartPtr = packet;
   }
 }
 
-bool isQueueEmpty() {
-  return send_q_head_pointer == send_q_tail_pointer;
-}
+// ==========================================
+// 2. 큐 관리 및 PC 입력 (PC -> Queue)
+// ==========================================
+void chamber() {
+  if (Serial.available() > 0 && !isQueueFull()) {
+    char temp_buffer[128];
+    // PC 데이터 읽기
+    int readLen = Serial.readBytesUntil('\n', temp_buffer, 127);
+    if (readLen <= 0) return;
+    temp_buffer[readLen] = '\0';
 
-bool isQueueFull() {
-  return ((send_q_tail_pointer + 1) % 5) == send_q_head_pointer;
-}
-
-void chamber() 
-{
-  char temp_buffer[128];
-
-  if(Serial.available()>0 && !isQueueFull()){
-    delay(10); 
-    uint8_t readbyte = Serial.readBytesUntil('\n', temp_buffer, 127);
-    temp_buffer[readbyte] = '\0';
-
-    if (temp_buffer[0] == 'C'){
+    // 커맨드 처리 (C$...)
+    if (temp_buffer[0] == 'C') {
       command(temp_buffer);
       return;
     }
-    if(readbyte > 0) {
-      uint8_t tailPointer = get_pointer(&send_q_tail_pointer);
-      strcpy(send_q[tailPointer], temp_buffer);
-      coked = true;
-      
-      // [TEST] 큐 적재 확인
-      //Serial.print("[COKED] Queue Added. Head: ");
-      //Serial.print(send_q_head_pointer);
-      //Serial.print(" Tail: ");
-      //Serial.println(send_q_tail_pointer);
+
+    // 큐에 저장 (Push)
+    // 현재 tail 위치에 복사 후 tail 증가
+    strcpy(send_q[send_q_tail], temp_buffer);
+    send_q_tail = get_next_pointer(send_q_tail);
+  }
+}
+
+void command(char com[]) {
+  // 예: C$0$1 (커맨드$0$노드ID)
+  // strtok는 원본을 자르므로 복사본을 쓰거나 주의해서 사용
+  char* token = strtok(com, "$"); // 'C'
+  token = strtok(NULL, "$");      // '0' (Type)
+  
+  if (token != NULL && atoi(token) == 0) {
+    token = strtok(NULL, "$"); // NodeID
+    if (token != NULL) {
+      nodeID = atoi(token);
+      // Serial.println("ID SET OK"); // 디버깅용
     }
   }
 }
 
-void trySend()
-{
-  if(isQueueEmpty()) { return; }
-  
-  unsigned long currentMillis = millis();
+// ==========================================
+// 3. 송신 로직 (Queue -> RF)
+// ==========================================
+void trySend() {
+  if (nodeID == -1) return; // ID 설정 전에는 송신 불가
+  if (isQueueEmpty()) return;
 
-  // 동기화 대기 (Node 0 제외)
-  if (nodeID != 0 && lastSyncTime == 0) {
-     // [TEST] 동기화 대기 중 알림 (너무 자주 뜨면 주석 처리)
-     //Serial.println("[WAIT] Waiting for SYNC..."); 
-     return; 
+  unsigned long currentMillis = millis();
+  
+  // 1. 현재 가상 시간 계산
+  long virtualTime;
+  if (nodeID == 0) {
+    virtualTime = currentMillis % CYCLE_DURATION;
+  } else {
+    virtualTime = (currentMillis + localOffset) % CYCLE_DURATION;
+    if (virtualTime < 0) virtualTime += CYCLE_DURATION;
   }
 
-  unsigned long timeSinceSync = currentMillis - lastSyncTime;
-  unsigned long timeInCycle = timeSinceSync % CYCLE_TIME; 
-  
-  unsigned long mySlotStart = nodeID * SLOT_TIME; 
-  unsigned long mySlotEnd = (nodeID + 1) * SLOT_TIME;
+  // 2. 내 슬롯 확인
+  long mySlotStart = nodeID * SLOT_DURATION;
+  long mySlotEnd = (nodeID + 1) * SLOT_DURATION;
 
-  // 내 슬롯 + 가드타임 체크
-  if (timeInCycle > (mySlotStart + GUARD_TIME) && 
-      timeInCycle < (mySlotEnd - GUARD_TIME)) {
-      
-      if(digitalRead(AUX_PIN) == HIGH) { 
-        uint8_t headPointer = get_pointer(&send_q_head_pointer);
-        myLoRa.println(send_q[headPointer]); 
-        coked = false;
-        
-        // [TEST] 전송 성공 확인
-        //Serial.print("[SEND_SUCCESS] Time: ");
-        //Serial.println(currentMillis);
-      }
+  if (virtualTime >= mySlotStart && virtualTime < mySlotEnd) {
+    // 송신 가능 구간!
+    
+    // 큐에서 데이터 꺼내기 (Pop)
+    char* data = send_q[send_q_head];
+    
+    // 타임스탬프 붙여서 전송: [TIME]$[DATA]
+    String rfPacket = String(virtualTime) + "$" + String(data);
+    myLoRa.println(rfPacket);
+    
+    // 전송 후 처리
+    send_q_head = get_next_pointer(send_q_head); // head 이동
+    delay(30); // 패킷 간 충돌 방지 및 슬롯 내 과다 전송 방지 딜레이
   }
 }
 
-uint8_t get_pointer(uint8_t* pointer){
-  uint8_t returnValue = *pointer;
-  *pointer = (*pointer + 1) % 5;
-  return returnValue;
+// ==========================================
+// 유틸리티 함수
+// ==========================================
+uint8_t get_next_pointer(uint8_t pointer) {
+  return (pointer + 1) % 5;
+}
+
+bool isQueueEmpty() {
+  return send_q_head == send_q_tail;
+}
+
+bool isQueueFull() {
+  return get_next_pointer(send_q_tail) == send_q_head;
 }
