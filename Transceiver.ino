@@ -63,7 +63,7 @@ unsigned long backOffEndTime = 0; //for CSMA 4byte
 volatile unsigned long lastSqwMillis = 0;
 volatile bool sqwFlag = false;
 
-uint8_t nodeID = -1;
+int8_t nodeID = -1;
 
 void handleSqw();
 void receiver();
@@ -108,6 +108,7 @@ void setup() {
 }
 
 void loop() {
+  //Serial.println(millis());
   if (sqwFlag) {
     sqwFlag = false;
     handleSqw();
@@ -117,6 +118,7 @@ void loop() {
   chamber();
   //trySend();
   if (!isMaster && !isSynced && nodeID != -1) trySyncRequest();  // 미동기화 슬레이브: 재요청
+  //Serial.println(millis());
   if (isReady()) trySend();
 }
 
@@ -319,7 +321,8 @@ void trySend() {
   uint16_t slot_start = nodeID * 250;
   uint16_t slot_end = slot_start + 250;
 
-  if (current_ms_slot > slot_start && current_ms_slot < slot_end && sqwFlag == true && coked == true){
+  if (current_ms_slot > slot_start && current_ms_slot < slot_end && coked == true){
+    //Serial.println("go");
     myLoRa.print(send_q[get_pointer(&send_q_head_pointer)]);
     sqwFlag = false;
     if(isQueueEmpty()){
