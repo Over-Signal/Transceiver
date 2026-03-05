@@ -18,7 +18,7 @@
 #define RF_PROP_DELAY_US 33
 #define EMA_ALPHA_X100 20
 #define OFFSET_APPLY_THR 3
-#define RESYNC_INTERVAL 15 //초
+#define RESYNC_INTERVAL 3600 //초
 #define REQ_RETRY_INTERVAL_MS 3000 
 #define REQ_RETRY_MAX 20 
 
@@ -40,7 +40,6 @@ long  smoothedOffset = 0;
 long  lastRawOffset = 0;
 long  syncOffset = 0; 
 
-
 //buffer
 char send_q[5][128]; //128*5 = 640byte
 uint8_t send_q_head_pointer = 0; //1byte
@@ -56,6 +55,7 @@ bool ledFlashActive = false;
 unsigned long lastReqMillis = 0;   // 마지막 REQ 전송 시각
 uint8_t reqRetryCount = 0;   // 재시도 횟수
 bool reqGiveUp = false;
+bool reqFlag = false;
 
 bool coked = false;
 unsigned long backOffEndTime = 0; //for CSMA 4byte
@@ -63,7 +63,7 @@ unsigned long backOffEndTime = 0; //for CSMA 4byte
 volatile unsigned long lastSqwMillis = 0;
 volatile bool sqwFlag = false;
 
-uint8_t nodeID = 0;
+uint8_t nodeID = -1;
 
 void handleSqw();
 void receiver();
@@ -116,7 +116,7 @@ void loop() {
   receiver();
   chamber();
   //trySend();
-   if (!isMaster && !isSynced) trySyncRequest();  // 미동기화 슬레이브: 재요청
+  if (!isMaster && !isSynced && nodeID != -1) trySyncRequest();  // 미동기화 슬레이브: 재요청
   if (isReady()) trySend();
 }
 
@@ -136,7 +136,7 @@ void trySyncRequest() {
 void sendSyncRequest() {
   if (!waitAUX(100)) return;
   char buf[16];
-  snprintf(buf, sizeof(buf), "%c,0,%u\n", REQ_PACKET_ID, nodeID);
+  snprintf(buf, sizeof(buf), "C$%c$%u", REQ_PACKET_ID, nodeID);
   myLoRa.print(buf);
   lastReqMillis = millis();
   reqRetryCount++;
@@ -149,9 +149,10 @@ void handleSqw() {
   if (isMaster) {
     // 마스터: 재동기화 간격마다 브로드캐스트
     unsigned long nowSec = millis() / 1000;
-    if (lastResyncSec == 0 || (nowSec - lastResyncSec) >= RESYNC_INTERVAL) {
+    if (lastResyncSec == 0 || (nowSec - lastResyncSec) >= RESYNC_INTERVAL || reqFlag == true) {
       sendSyncPacket();
       lastResyncSec = nowSec;
+      reqFlag = false;
     }
   }
   // 슬레이브: SQW 시 별도 동작 없음
@@ -190,15 +191,16 @@ void command(char com[], unsigned long rxMillis = 0){
       uint8_t packetElapsed = (uint8_t)atoi(strtok(NULL, "$"));
       uint8_t senderID = (uint8_t)atoi(strtok(NULL, "$"));
       
-      if (!isMaster && senderID != nodeID) //추후 조건검증 변경 필요 / 원 구문 :if (!isMaster() && senderID == MASTER_ID)
+      if (!isMaster && senderID != nodeID){ //추후 조건검증 변경 필요 / 원 구문 :if (!isMaster() && senderID == MASTER_ID)
         applySyncPacket(rxMillis, packetElapsed);
+      } 
       break;
     }
 
     case REQ_PACKET_ID:{
       //sSerial.println("true R");
        if (isMaster) {
-        sendSyncPacket();
+        reqFlag = true;
       }
       break;
 
@@ -230,7 +232,6 @@ void applySyncPacket(unsigned long rxMillis, uint16_t masterElapsed) {
   reqRetryCount  = 0;
   reqGiveUp      = false;
 }
-
 
 void receiver() {
   if (myLoRa.available() <= 0) return;
@@ -265,10 +266,10 @@ void updateLED() {
     return;
   }
 
-  uint16_t elapsed   = getElapsed();
+  uint16_t elapsed = getElapsed();
   uint16_t slotStart = (uint16_t)nodeID * SLOT_SIZE_MS + GUARD_TIME_MS;
-  uint16_t slotEnd   = ((uint16_t)nodeID + 1) * SLOT_SIZE_MS - GUARD_TIME_MS;
-  bool     inTxSlot  = (elapsed >= slotStart && elapsed < slotEnd);
+  uint16_t slotEnd = ((uint16_t)nodeID + 1) * SLOT_SIZE_MS - GUARD_TIME_MS;
+  bool inTxSlot = (elapsed >= slotStart && elapsed < slotEnd);
 
   if (ledFlashActive) {
     if (millis() >= ledOffTime) {
@@ -300,7 +301,7 @@ void chamber()
     uint8_t readbyte = Serial.readBytesUntil('\n', temp_buffer, 127);
     temp_buffer[readbyte] = '\0';
 
-    if (temp_buffer[0] == 'C'){
+    if (temp_buffer[0] != '1'){
       command(temp_buffer);
       return;
     }
